@@ -20,7 +20,7 @@ from ldm.models.diffusion.plms import PLMSSampler
 from ldm.models.diffusion.dpm_solver import DPMSolverSampler
 
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
-from transformers import AutoFeatureExtractor
+from transformers import AutoFeatureExtractor, AutoProcessor, BlipForConditionalGeneration
 
 
 # load safety model
@@ -28,6 +28,10 @@ safety_model_id = "CompVis/stable-diffusion-safety-checker"
 safety_feature_extractor = AutoFeatureExtractor.from_pretrained(safety_model_id)
 safety_checker = StableDiffusionSafetyChecker.from_pretrained(safety_model_id)
 
+# load blip model
+blip_model_id = "Salesforce/blip-image-captioning-large"
+blip_model = BlipForConditionalGeneration.from_pretrained(blip_model_id)
+blip_processor = AutoProcessor.from_pretrained(blip_model_id)
 
 def chunk(it, size):
     it = iter(it)
@@ -300,7 +304,7 @@ def main():
                             prompts = list(prompts)
                         c = model.get_learned_conditioning(prompts)
                         shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
-                        samples_ddim, _ = sampler.sample(S=opt.ddim_steps,
+                        samples_ddim, intermediates_ddim = sampler.sample(S=opt.ddim_steps,
                                                          conditioning=c,
                                                          batch_size=opt.n_samples,
                                                          shape=shape,
@@ -310,21 +314,58 @@ def main():
                                                          eta=opt.ddim_eta,
                                                          x_T=start_code)
 
+                        
+                        
                         x_samples_ddim = model.decode_first_stage(samples_ddim)
                         x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                         x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
+
 
                         x_checked_image, has_nsfw_concept = check_safety(x_samples_ddim)
 
                         x_checked_image_torch = torch.from_numpy(x_checked_image).permute(0, 3, 1, 2)
 
+                        x_intermediates = []
+                        for inter in intermediates_ddim['x_inter']:
+
+                            x_intermediates_ddim = model.decode_first_stage(inter)
+                            x_intermediates_ddim = torch.clamp((x_intermediates_ddim + 1.0) / 2.0, min=0.0, max=1.0)
+
+                            x_intermediates.append(x_intermediates_ddim)
+
+                        
+                        # Save intermediate samples
                         if not opt.skip_save:
+                            print("Prompt: ", prompt)
                             for x_sample in x_checked_image_torch:
                                 x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                                 img = Image.fromarray(x_sample.astype(np.uint8))
                                 img = put_watermark(img, wm_encoder)
                                 img.save(os.path.join(sample_path, f"{base_count:05}.png"))
+                                count = 0
+                                for x_intermediate in x_intermediates: 
+                                    for x_inter in x_intermediate:
+                                        x_inter = 255. * rearrange(x_inter.cpu().numpy(), 'c h w -> h w c')
+                                        img_ = Image.fromarray(x_inter.astype(np.uint8))
+                                        img = put_watermark(img_, wm_encoder)
+                                        if count % 10 == 0:
+                                            img.save(os.path.join(sample_path, f"{base_count:05}_inter_{count:05}.png"))
+                                             
+                                            # print similarity loss 
+                                            inputs = blip_processor(text=prompt, images=img_, return_tensors="pt", padding=True)
+                                            inputs = {key: inputs[key] for key in inputs.keys()}
+                                            prompt_length = len(blip_processor.tokenizer(prompt).input_ids) - 1
+                                            inputs['labels'] = inputs['input_ids'].masked_fill(inputs['input_ids'] == blip_processor.tokenizer.pad_token_id, -100)
+                                            inputs['labels'][:, :prompt_length] = -100
+                                            print(inputs['labels'])
+                                            outputs = blip_model(**inputs)
+                                            loss = outputs.loss
+                                            print(f"Image: {base_count:05}_inter_{count:05}.png || Loss: {loss:.4f}" )
+                                        count += 1
+                                
                                 base_count += 1
+                            
+
 
                         if not opt.skip_grid:
                             all_samples.append(x_checked_image_torch)

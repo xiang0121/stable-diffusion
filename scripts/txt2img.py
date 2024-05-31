@@ -312,6 +312,7 @@ def main():
                                                          unconditional_guidance_scale=opt.scale,
                                                          unconditional_conditioning=uc,
                                                          eta=opt.ddim_eta,
+                                                         log_every_t = 10,
                                                          x_T=start_code)
 
                         
@@ -326,7 +327,7 @@ def main():
                         x_checked_image_torch = torch.from_numpy(x_checked_image).permute(0, 3, 1, 2)
 
                         x_intermediates = []
-                        for inter in intermediates_ddim['x_inter']:
+                        for inter in intermediates_ddim['pred_x0']:
 
                             x_intermediates_ddim = model.decode_first_stage(inter)
                             x_intermediates_ddim = torch.clamp((x_intermediates_ddim + 1.0) / 2.0, min=0.0, max=1.0)
@@ -348,19 +349,19 @@ def main():
                                         x_inter = 255. * rearrange(x_inter.cpu().numpy(), 'c h w -> h w c')
                                         img_ = Image.fromarray(x_inter.astype(np.uint8))
                                         img = put_watermark(img_, wm_encoder)
-                                        if count % 10 == 0:
-                                            img.save(os.path.join(sample_path, f"{base_count:05}_inter_{count:05}.png"))
-                                             
-                                            # print similarity loss 
-                                            inputs = blip_processor(text=prompt, images=img_, return_tensors="pt", padding=True)
-                                            inputs = {key: inputs[key] for key in inputs.keys()}
-                                            prompt_length = len(blip_processor.tokenizer(prompt).input_ids) - 1
-                                            inputs['labels'] = inputs['input_ids'].masked_fill(inputs['input_ids'] == blip_processor.tokenizer.pad_token_id, -100)
-                                            inputs['labels'][:, :prompt_length] = -100
-                                            print(inputs['labels'])
-                                            outputs = blip_model(**inputs)
-                                            loss = outputs.loss
-                                            print(f"Image: {base_count:05}_inter_{count:05}.png || Loss: {loss:.4f}" )
+                                        # if count % 10 == 0:
+                                        img.save(os.path.join(sample_path, f"{base_count:05}_inter_{count:05}.png"))
+                                            
+                                        # print similarity loss 
+                                        inputs = blip_processor(text=prompt, images=img_, return_tensors="pt", padding=True)
+                                        inputs = {key: inputs[key] for key in inputs.keys()}
+                                        prompt_length = len(blip_processor.tokenizer(prompt).input_ids) - 1
+                                        inputs['labels'] = inputs['input_ids'].masked_fill(inputs['input_ids'] == blip_processor.tokenizer.pad_token_id, -100)
+                                        inputs['labels'][:, :prompt_length] = -100
+                                        # print(inputs['labels'])
+                                        outputs = blip_model(**inputs)
+                                        loss = outputs.loss
+                                        print(f"Image: {base_count:05}_inter_{count:05}.png || Loss: {loss:.4f}" )
                                         count += 1
                                 
                                 base_count += 1

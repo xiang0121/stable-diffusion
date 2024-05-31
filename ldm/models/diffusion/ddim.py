@@ -155,8 +155,9 @@ class DDIMSampler(object):
             img, pred_x0 = outs
             if callback: callback(i)
             if img_callback: img_callback(pred_x0, i)
-
+            
             if index % log_every_t == 0 or index == total_steps - 1:
+                # print("save intermediate")
                 intermediates['x_inter'].append(img)
                 intermediates['pred_x0'].append(pred_x0)
 

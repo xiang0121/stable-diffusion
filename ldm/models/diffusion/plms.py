@@ -162,7 +162,10 @@ class PLMSSampler(object):
                 old_eps.pop(0)
             if callback: callback(i)
             if img_callback: img_callback(pred_x0, i)
+
+            # save intermediate results
             intermediates['x_inter'].append(img)
+            
             if index % log_every_t == 0 or index == total_steps - 1:
                 intermediates['pred_x0'].append(pred_x0)
 
